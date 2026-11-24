@@ -53,3 +53,5 @@ services:
 
 volumes:
   todo-data:
+    # 固定卷名，避免 Compose 自动加项目前缀（README 的备份/恢复命令按此名字挂载）
+    name: todo-data

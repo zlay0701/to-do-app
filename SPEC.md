@@ -522,7 +522,7 @@ pnpm tauri android build --apk        # 需 JDK 17 + NDK r26 + cargo-ndk
 
 ```bash
 cargo build --release -p todo-server
-TODO_MASTER_KEY=<base64-32B> TODO_ADMIN_PASSWORD=<初始密码> ./todo-server
+TODO_MASTER_KEY=<base64-32B> TODO_ADMIN_PASSWORD=<初始密码> TODO_INSECURE_HTTP=1 ./todo-server
 ```
 
 | 变量 | 必填 | 默认 |
@@ -533,6 +533,7 @@ TODO_MASTER_KEY=<base64-32B> TODO_ADMIN_PASSWORD=<初始密码> ./todo-server
 | `TODO_DB_PATH` | | `/data/app.db` |
 | `TODO_PORT` | | `8787` |
 | `TODO_POLL_INTERVAL`（提醒 tick） | | `60` 秒 |
+| `TODO_INSECURE_HTTP` | 裸 HTTP 时必须 | 未设为 `1` 时拒绝启动；生产请走 TLS 反代 |
 
 Docker compose 与反代示例沿用：`remind.example.com { reverse_proxy 127.0.0.1:8787 }`。
 备份 = 复制 `/data/app.db`（含 WAL）+ 保存主密钥。

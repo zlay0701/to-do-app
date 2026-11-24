@@ -109,7 +109,7 @@ docker compose start todo-server
 # 恢复：先停服务，再把备份拷回卷里（覆盖同名文件），最后启动：
 docker compose stop todo-server
 docker run --rm -v todo-data:/data -v "$PWD/backup:/backup" \
-  debian:bookworm-slim cp /backup/app.db /data/app.db
+  debian:bookworm-slim cp /backup/app.db /backup/app.db-wal /backup/app.db-shm /data/ 2>/dev/null
 docker compose start todo-server
 ```
 
@@ -131,12 +131,16 @@ remind.example.com {
 
 1. **systemd（裸跑部署推荐）**：仓库正本 `deploy/todo-server.service`，安装：
    ```bash
+   # unit 里的路径固定为 /opt/todo-app，先把二进制与 .env 放过去（或同步改 unit 的三处路径）
+   sudo mkdir -p /opt/todo-app/target/release
+   sudo cp target/release/todo-server /opt/todo-app/target/release/
+   sudo cp .env /opt/todo-app/.env && sudo chmod 600 /opt/todo-app/.env
    sudo cp deploy/todo-server.service /etc/systemd/system/todo-server.service
    sudo systemctl daemon-reload
    sudo systemctl enable --now todo-server
    sudo systemctl status todo-server
    ```
-   `Restart=on-failure` + `RestartSec=5`，崩溃自动重起；`EnvironmentFile` 读项目目录 `.env`（0600、root 所有，unit 以 `User=root` 运行才读得到）。注意：本机 VM 重启会回滚 `/tmp` 与 apt 装的系统包，`/etc` 的持久性未知——`/etc/systemd/system` 下的只是安装副本，重启后如丢失，从仓库正本按上面三步重装即可。
+   `Restart=on-failure` + `RestartSec=5`，崩溃自动重起；`EnvironmentFile` 读 `/opt/todo-app/.env`（0600、root 所有，unit 以 `User=root` 运行才读得到）。注意：本机 VM 重启会回滚 `/tmp` 与 apt 装的系统包，`/etc` 的持久性未知——`/etc/systemd/system` 下的只是安装副本，重启后如丢失，从仓库正本按上面三步重装即可。
 2. **compose**：`docker-compose.yml` 已设 `restart: unless-stopped`，宿主机重启后 Docker 会自动把容器拉起来（前提是 Docker 守护进程本身随系统启动；本机 dockerd 目前是手动起的，见 PROGRESS.md 环境说明）。
 
 当前开发环境是 `nohup ./target/release/todo-server` 起的服务，VM 重启后不会自动恢复，需手动再起，或改用上面两种保活方案之一。两种方案不要混用：不要同时用 unit 与 compose 起两个实例监听 8787，也不要与开发 nohup 服务同时跑，会端口冲突。

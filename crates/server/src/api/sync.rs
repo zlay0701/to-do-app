@@ -57,28 +57,25 @@ pub async fn sync(
 
     // 拉取：server_rev > lastCursor，单次最多 5000 条；cursor 取本轮拉到的最大 rev
     //（截断时只能推进到最后一条，否则会丢记录；无记录时沿用原 cursor）。
+    // lists 与 tasks 必须按全局 rev 一起截断：分别 LIMIT 会让夹在 lists 之间的
+    // task 被 cursor 越过而永久拉不到（见 repo::pull_changes 注释）。
     let (mut lists, mut tasks, cursor) = {
         let db = state
             .db
             .lock()
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db locked"))?;
-        let pulled_lists = repo::pull_lists(&db, req.last_cursor, MAX_PULL)
+        let pulled = repo::pull_changes(&db, req.last_cursor, MAX_PULL)
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-        let remaining = MAX_PULL - pulled_lists.len() as i64;
-        let pulled_tasks = if remaining > 0 {
-            repo::pull_tasks(&db, req.last_cursor, remaining)
-                .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        } else {
-            Vec::new()
-        };
-        let cursor = pulled_lists
-            .iter()
-            .map(|(_, rev)| *rev)
-            .chain(pulled_tasks.iter().map(|(_, rev)| *rev))
-            .max()
-            .unwrap_or(req.last_cursor);
-        let lists: Vec<TodoList> = pulled_lists.into_iter().map(|(l, _)| l).collect();
-        let tasks: Vec<Task> = pulled_tasks.into_iter().map(|(t, _)| t).collect();
+        let mut lists: Vec<TodoList> = Vec::new();
+        let mut tasks: Vec<Task> = Vec::new();
+        let mut cursor = req.last_cursor;
+        for (change, rev) in pulled {
+            match change {
+                repo::PulledChange::List(list) => lists.push(list),
+                repo::PulledChange::Task(task) => tasks.push(task),
+            }
+            cursor = rev;
+        }
         (lists, tasks, cursor)
     };
 
@@ -326,6 +323,35 @@ mod tests {
             .await
             .unwrap();
         resp
+    }
+
+    /// 全局截断：lists 与 tasks 交错时，前 limit 条必须按 rev 取。
+    /// 旧实现让 lists 先占满额度，夹在中间的 task 会被 cursor 越过、永久拉不到。
+    #[test]
+    fn pull_changes_truncates_globally_without_skipping_tasks() {
+        let (state, path) = test_state();
+        {
+            let mut conn = state.db.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            let rev = repo::next_rev(&tx).unwrap();
+            repo::upsert_list_tx(&tx, &list("L1", 100), rev).unwrap();
+            let rev = repo::next_rev(&tx).unwrap();
+            repo::upsert_task_tx(&tx, &task("T1", "between lists", 100, "dev-a"), rev).unwrap();
+            let rev = repo::next_rev(&tx).unwrap();
+            repo::upsert_list_tx(&tx, &list("L2", 100), rev).unwrap();
+            let rev = repo::next_rev(&tx).unwrap();
+            repo::upsert_task_tx(&tx, &task("T2", "after lists", 100, "dev-a"), rev).unwrap();
+            tx.commit().unwrap();
+        }
+        let conn = state.db.lock().unwrap();
+        let pulled = repo::pull_changes(&conn, 0, 2).unwrap();
+        assert_eq!(pulled.len(), 2);
+        assert_eq!(pulled[0].1, 1);
+        assert_eq!(pulled[1].1, 2);
+        assert!(matches!(&pulled[0].0, repo::PulledChange::List(_)));
+        assert!(matches!(&pulled[1].0, repo::PulledChange::Task(_)));
+        drop(conn);
+        let _ = std::fs::remove_file(path);
     }
 
     /// §9.3 / v4.7：被拒记录的服务端权威版本必须随 apply 下发。

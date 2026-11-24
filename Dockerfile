@@ -7,7 +7,7 @@
 #     --build-arg http_proxy="$http_proxy" \
 #     --build-arg https_proxy="$https_proxy" \
 #     --build-arg no_proxy="$no_proxy" .
-#   # 代理只在 builder 阶段用于 cargo 联网，不会进入 runtime 镜像；
+#   # 代理只在构建阶段用于 cargo / apt 联网，不会作为 ENV 进入运行镜像；
 #   # 绝不要把 TODO_MASTER_KEY / TODO_ADMIN_PASSWORD / TODO_SYNC_TOKEN
 #   # 等任何密钥写进 Dockerfile、构建参数或镜像层。
 #
@@ -49,6 +49,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # ---------- runtime ----------
 FROM ${RUNTIME_IMAGE}
+
+# ARG 只在本构建阶段可用：apt-get 同样可能需要经代理出网。
+# 用 ARG 而非 ENV，代理地址不会写进镜像的运行时环境。
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 # ca-certificates：SMTP / Webhook 走 TLS 时校验对方证书需要系统根证书。
 RUN apt-get update \

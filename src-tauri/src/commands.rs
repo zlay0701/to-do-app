@@ -74,13 +74,25 @@ pub fn create_task(
         .map_err(|e| e.to_string())
 }
 
+/// `dueAt: null` 表示“清空到期时间”。serde 对 `Option<Option<T>>` 会把
+/// JSON null 解成外层 None（与字段未提供同义），导致 update_task 里的
+/// `if let Some(due_at)` 不成立、旧 dueAt 被保留。这里显式把 null 映射成
+/// `Some(None)`，而字段缺省仍由 `#[serde(default)]` 得到 `None`。
+fn deserialize_due_at_patch<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<i64> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTaskInput {
     title: Option<String>,
     notes: Option<String>,
     priority: Option<i32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_due_at_patch")]
     due_at: Option<Option<i64>>,
     list_id: Option<String>,
 }
@@ -615,4 +627,19 @@ pub fn due_notifications(state: State<'_, AppState>) -> CmdResult<Vec<Task>> {
         &repo,
         settings.before_min,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_task_due_at_patch_distinguishes_null_from_absent() {
+        let patch: UpdateTaskInput = serde_json::from_str(r#"{"dueAt":null}"#).unwrap();
+        assert_eq!(patch.due_at, Some(None), "null 必须表示清空 dueAt");
+        let patch: UpdateTaskInput = serde_json::from_str(r#"{"dueAt":123}"#).unwrap();
+        assert_eq!(patch.due_at, Some(Some(123)));
+        let patch: UpdateTaskInput = serde_json::from_str("{}").unwrap();
+        assert_eq!(patch.due_at, None, "字段缺省不能改动 dueAt");
+    }
 }

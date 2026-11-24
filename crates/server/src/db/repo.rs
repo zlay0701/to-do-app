@@ -212,6 +212,40 @@ pub fn pull_tasks(
     Ok(rows)
 }
 
+/// 全局拉取结果：lists 与 tasks 按 server_rev 交错排列。
+#[derive(Debug)]
+pub enum PulledChange {
+    List(TodoList),
+    Task(Task),
+}
+
+/// 全局拉取 `server_rev > cursor`，单次最多 `limit` 条，cursor 取最后一条的 rev。
+///
+/// lists 与 tasks 共享全局 rev_counter：不能各自独立 LIMIT 后直接拼接——若
+/// lists 占满 limit 个 rev，夹在其中的 task 就一条也拉不到，而 cursor 已越过
+/// 它们，之后永远不会补发。两张表各自取 cursor 之后最早的 limit 条，全局前
+/// limit 条必然都在这两个集合里；合并按 rev 排序再截断即可不漏记录。
+pub fn pull_changes(
+    conn: &Connection,
+    cursor: i64,
+    limit: i64,
+) -> rusqlite::Result<Vec<(PulledChange, i64)>> {
+    let mut merged: Vec<(PulledChange, i64)> = Vec::new();
+    merged.extend(
+        pull_lists(conn, cursor, limit)?
+            .into_iter()
+            .map(|(list, rev)| (PulledChange::List(list), rev)),
+    );
+    merged.extend(
+        pull_tasks(conn, cursor, limit)?
+            .into_iter()
+            .map(|(task, rev)| (PulledChange::Task(task), rev)),
+    );
+    merged.sort_by_key(|(_, rev)| *rev);
+    merged.truncate(limit.max(0) as usize);
+    Ok(merged)
+}
+
 // -- 设备与限频 --------------------------------------------------------------
 
 pub fn device_last_sync_at(conn: &Connection, device_id: &str) -> rusqlite::Result<Option<i64>> {
