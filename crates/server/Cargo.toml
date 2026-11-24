@@ -1,0 +1,28 @@
+[package]
+name = "todo-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "todo-server"
+path = "src/main.rs"
+
+[dependencies]
+todo-core = { path = "../core" }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+axum = { version = "0.7", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls", "rustls-tls", "builder", "hostname"] }
+argon2 = "0.5"
+aes-gcm = "0.10"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.8"

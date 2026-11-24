@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todo 服务端 · 管理</title>
+<style>
+  body { font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; background: #f6f7f9; color: #222; }
+  header { background: #1f6feb; color: #fff; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; }
+  header button { background: rgba(255,255,255,.2); color: #fff; border: 1px solid rgba(255,255,255,.5); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button { padding: 8px 18px; border: 1px solid #ccc; background: #fff; border-radius: 6px; cursor: pointer; font-size: 15px; }
+  .tabs button.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .card { background: #fff; border: 1px solid #e3e5e8; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  .card h3 { font-size: 14px; margin: 16px 0 8px; }
+  label { display: block; font-size: 13px; color: #555; margin: 8px 0 4px; }
+  input[type=text], input[type=password], input[type=number], textarea, select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  input[type=checkbox] { width: auto; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .btn { background: #1f6feb; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; margin-right: 8px; }
+  .btn.secondary { background: #fff; color: #1f6feb; border: 1px solid #1f6feb; }
+  .btn.danger { background: #cf222e; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; word-break: break-all; }
+  th { color: #555; background: #f6f7f9; }
+  tr.warn td { background: #fff8c5; }
+  .ok { color: #1a7f37; } .bad { color: #cf222e; } .muted { color: #888; font-size: 13px; }
+  #status { min-height: 20px; margin: 8px 0; font-size: 14px; }
+  #login { max-width: 360px; margin: 80px auto; background: #fff; padding: 24px; border-radius: 8px; border: 1px solid #e3e5e8; }
+  #login h1 { font-size: 18px; margin: 0 0 16px; }
+  .hidden { display: none; }
+  code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Todo 服务端 · 管理</h1>
+  <button id="logoutBtn" class="hidden">退出登录</button>
+</header>
+<main>
+  <div id="status"></div>
+
+  <section id="login" class="hidden">
+    <h1>管理员登录</h1>
+    <form id="loginForm">
+      <label>用户名<input type="text" id="loginUser" value="admin" autocomplete="username"></label>
+      <label>密码<input type="password" id="loginPass" autocomplete="current-password"></label>
+      <p><button class="btn" type="submit">登录</button></p>
+      <p id="loginErr" class="bad"></p>
+    </form>
+    <p class="muted">首次登录用 .env 里的 TODO_ADMIN_PASSWORD 种子账号（admin）。会话 24 小时，落库保存，服务端重启后仍有效。</p>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="tabs">
+      <button data-tab="conn" class="active">连接</button>
+      <button data-tab="notify">通知</button>
+      <button data-tab="runs">运行</button>
+    </div>
+
+    <div id="tab-conn">
+      <div class="card">
+        <h2>服务状态</h2>
+        <p>健康检查：<span id="healthOk">—</span>　上次提醒 tick：<span id="healthRun">—</span>　滞后：<span id="healthLag">—</span></p>
+        <p class="muted">裸 HTTP 仅开发可用，生产请走 TLS 反代（见 README 部署一节）。</p>
+      </div>
+      <div class="card">
+        <h2>同步令牌</h2>
+        <p>状态：<span id="tokenStatus">—</span></p>
+        <p><button class="btn" id="rotateTokenBtn">生成 / 重置令牌</button></p>
+        <p id="newTokenWrap" class="hidden">新令牌（只显示一次，请立即复制到客户端设置页，旧令牌即刻失效）：<br><code id="newToken"></code> <button class="btn secondary" id="copyTokenBtn">复制</button></p>
+      </div>
+      <div class="card">
+        <h2>设备</h2>
+        <p><button class="btn secondary" id="refreshDevicesBtn">刷新</button></p>
+        <table>
+          <thead><tr><th>设备</th><th>名称</th><th>平台</th><th>游标</th><th>上次同步</th><th>时钟偏差</th></tr></thead>
+          <tbody id="devicesBody"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+        </table>
+        <p class="muted">时钟偏差绝对值 &gt; 120 秒的行会标黄：该设备时间不准，可能导致旧数据覆盖新数据。</p>
+      </div>
+    </div>
+
+    <div id="tab-notify" class="hidden">
+      <div class="card">
+        <h2>通知配置</h2>
+        <form id="notifyForm">
+          <label><input type="checkbox" id="n_enabled"> 启用提醒</label>
+          <div class="row">
+            <div><label>SMTP 服务器<input type="text" id="n_smtpHost" placeholder="smtp.example.com"></label></div>
+            <div><label>SMTP 端口<input type="number" id="n_smtpPort"></label></div>
+          </div>
+          <div class="row">
+            <div><label>SMTP 用户名<input type="text" id="n_smtpUser"></label></div>
+            <div><label>发件人<input type="text" id="n_mailFrom" placeholder="默认同 SMTP 用户名"></label></div>
+          </div>
+          <label>收件人（多个用逗号分隔）<input type="text" id="n_mailTo" placeholder="a@example.com, b@example.com"></label>
+          <label>SMTP 密码<input type="password" id="n_smtpPassword" placeholder="留空表示不变"></label>
+          <label><input type="checkbox" id="n_clearSmtpPassword"> 清除已保存的 SMTP 密码</label>
+          <label>Webhook 地址<input type="text" id="n_webhookUrl" placeholder="https://…"></label>
+          <label>Webhook 密钥<input type="password" id="n_webhookSecret" placeholder="留空表示不变"></label>
+          <label><input type="checkbox" id="n_clearWebhookSecret"> 清除已保存的 Webhook 密钥</label>
+          <div class="row">
+            <div><label>提醒偏移（分钟，多个用逗号分隔，0 表示到期时）<input type="text" id="n_remindOffsets"></label></div>
+            <div><label>错过补发窗口（分钟）<input type="number" id="n_catchUpMin"></label></div>
+          </div>
+          <div class="row">
+            <div><label>时区<input type="text" id="n_timezone"></label></div>
+            <div><label>每日摘要时刻（小时，0–23）<input type="number" id="n_digestHour"></label></div>
+          </div>
+          <label><input type="checkbox" id="n_digestEnabled"> 启用每日摘要</label>
+          <p><button class="btn" type="submit">保存配置</button>
+          <span id="notifySaved" class="ok"></span></p>
+        </form>
+      </div>
+      <div class="card">
+        <h2>测试发送</h2>
+        <label>测试邮件收件人（留空用配置里的第一个收件人）<input type="text" id="testMailTo"></label>
+        <p>
+          <button class="btn" id="testMailBtn">发送测试邮件</button>
+          <button class="btn" id="testWebhookBtn">发送测试 Webhook（ping）</button>
+        </p>
+        <p id="testResult"></p>
+        <p class="muted">邮件认证失败时请用授权码而非登录密码；465/25 端口超时建议改 587 + STARTTLS。</p>
+      </div>
+    </div>
+
+    <div id="tab-runs" class="hidden">
+      <div class="card">
+        <h2>运行记录</h2>
+        <p><button class="btn secondary" id="refreshRunsBtn">刷新</button></p>
+        <table>
+          <thead><tr><th>#</th><th>开始</th><th>结束</th><th>扫描</th><th>入队</th><th>已发</th><th>失败</th><th>备注</th></tr></thead>
+          <tbody id="runsBody"><tr><td colspan="8" class="muted">加载中…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>提醒台账</h2>
+        <table>
+          <thead><tr><th>#</th><th>任务</th><th>类型</th><th>锚点</th><th>偏移</th><th>通道</th><th>状态</th><th>尝试</th><th>发送时间</th><th>错误</th></tr></thead>
+          <tbody id="ledgerBody"><tr><td colspan="10" class="muted">加载中…</td></tr></tbody>
+        </table>
+        <p class="muted">状态：0 待发送 / 1 已发送 / 2 失败。台账唯一键保证重启不重发。</p>
+      </div>
+      <div class="card">
+        <h2>冲突日志</h2>
+        <table>
+          <thead><tr><th>#</th><th>实体</th><th>记录</th><th>胜方</th><th>败方</th><th>胜方时间</th><th>败方时间</th><th>解决时间</th></tr></thead>
+          <tbody id="conflictsBody"><tr><td colspan="8" class="muted">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+function setStatus(msg, bad) { statusEl.textContent = msg || ""; statusEl.className = bad ? "bad" : "ok"; }
+function esc(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function fmt(ts) { if (ts == null) return "—"; const d = new Date(ts); return isNaN(d) ? "—" : d.toLocaleString(); }
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ credentials: "same-origin" }, opts || {}));
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* 非 JSON 响应 */ }
+  if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+  return data;
+}
+function show(view) {
+  $("login").classList.toggle("hidden", view !== "login");
+  $("app").classList.toggle("hidden", view !== "app");
+  $("logoutBtn").classList.toggle("hidden", view !== "app");
+}
+function switchTab(name) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  ["conn", "notify", "runs"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== name));
+  if (name === "conn") loadConn();
+  if (name === "notify") loadNotify();
+  if (name === "runs") loadRuns();
+}
+async function loadConn() {
+  try {
+    const h = await api("/healthz");
+    $("healthOk").textContent = h.ok ? "正常" : "异常";
+    $("healthRun").textContent = fmt(h.lastRunAt);
+    $("healthLag").textContent = h.lagSeconds == null ? "—" : h.lagSeconds + " 秒";
+  } catch (e) { $("healthOk").textContent = "读取失败：" + e.message; }
+  try {
+    const t = await api("/api/token");
+    $("tokenStatus").textContent = t.hasToken ? "已配置" : "未配置";
+  } catch (e) { $("tokenStatus").textContent = "读取失败：" + e.message; }
+  try {
+    const devices = await api("/api/devices");
+    const body = $("devicesBody");
+    if (!devices.length) { body.innerHTML = '<tr><td colspan="6" class="muted">暂无设备同步过</td></tr>'; return; }
+    body.innerHTML = devices.map((d) => {
+      const off = d.clockOffsetMs;
+      const warn = off != null && Math.abs(off) > 120000;
+      return "<tr" + (warn ? ' class="warn"' : "") + "><td>" + esc(d.deviceId) + "</td><td>" + esc(d.name) + "</td><td>" + esc(d.platform) + "</td><td>" + d.lastCursor + "</td><td>" + fmt(d.lastSyncAt) + "</td><td>" + (off == null ? "—" : (off / 1000) + " 秒" + (warn ? " ⚠ 时间漂移" : "")) + "</td></tr>";
+    }).join("");
+  } catch (e) { $("devicesBody").innerHTML = '<tr><td colspan="6" class="bad">读取失败：' + esc(e.message) + "</td></tr>"; }
+}
+async function loadNotify() {
+  try {
+    const out = await api("/api/notify");
+    const c = out;
+    $("n_enabled").checked = !!c.enabled;
+    $("n_smtpHost").value = c.smtpHost || "";
+    $("n_smtpPort").value = c.smtpPort ?? 587;
+    $("n_smtpUser").value = c.smtpUser || "";
+    $("n_mailFrom").value = c.mailFrom || "";
+    $("n_mailTo").value = (c.mailTo || []).join(", ");
+    $("n_webhookUrl").value = c.webhookUrl || "";
+    $("n_remindOffsets").value = (c.remindOffsets || []).join(", ");
+    $("n_catchUpMin").value = c.catchUpMin ?? 120;
+    $("n_timezone").value = c.timezone || "Asia/Shanghai";
+    $("n_digestEnabled").checked = !!c.digestEnabled;
+    $("n_digestHour").value = c.digestHour ?? 8;
+    $("n_smtpPassword").value = "";
+    $("n_webhookSecret").value = "";
+    $("n_clearSmtpPassword").checked = false;
+    $("n_clearWebhookSecret").checked = false;
+  } catch (e) { setStatus("读取通知配置失败：" + e.message, true); }
+}
+async function loadRuns() {
+  try {
+    const runs = await api("/api/runs?limit=50");
+    $("runsBody").innerHTML = runs.length ? runs.map((r) => "<tr><td>" + r.id + "</td><td>" + fmt(r.startedAt) + "</td><td>" + fmt(r.finishedAt) + "</td><td>" + r.scanned + "</td><td>" + r.enqueued + "</td><td>" + r.sent + "</td><td>" + r.failed + "</td><td>" + esc(r.note || "") + "</td></tr>").join("") : '<tr><td colspan="8" class="muted">暂无运行记录</td></tr>';
+  } catch (e) { $("runsBody").innerHTML = '<tr><td colspan="8" class="bad">读取失败：' + esc(e.message) + "</td></tr>"; }
+  try {
+    const ledger = await api("/api/ledger?limit=50");
+    const st = { 0: "待发送", 1: "已发送", 2: "失败" };
+    $("ledgerBody").innerHTML = ledger.length ? ledger.map((l) => "<tr><td>" + l.id + "</td><td>" + esc(l.taskId) + "</td><td>" + esc(l.kind) + "</td><td>" + l.anchor + "</td><td>" + l.offsetMin + "</td><td>" + esc(l.channel) + "</td><td>" + (st[l.status] || l.status) + "</td><td>" + l.attempts + "</td><td>" + fmt(l.sentAt) + "</td><td>" + esc(l.lastError || "") + "</td></tr>").join("") : '<tr><td colspan="10" class="muted">暂无台账记录</td></tr>';
+  } catch (e) { $("ledgerBody").innerHTML = '<tr><td colspan="10" class="bad">读取失败：' + esc(e.message) + "</td></tr>"; }
+  try {
+    const conflicts = await api("/api/conflicts?limit=50");
+    $("conflictsBody").innerHTML = conflicts.length ? conflicts.map((c) => "<tr><td>" + c.id + "</td><td>" + esc(c.entity) + "</td><td>" + esc(c.entityId) + "</td><td>" + esc(c.winnerOrigin) + "</td><td>" + esc(c.loserOrigin) + "</td><td>" + fmt(c.winnerUpdatedAt) + "</td><td>" + fmt(c.loserUpdatedAt) + "</td><td>" + fmt(c.resolvedAt) + "</td></tr>").join("") : '<tr><td colspan="8" class="muted">暂无冲突记录</td></tr>';
+  } catch (e) { $("conflictsBody").innerHTML = '<tr><td colspan="8" class="bad">读取失败：' + esc(e.message) + "</td></tr>"; }
+}
+$("loginForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("loginErr").textContent = "";
+  try {
+    await api("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: $("loginUser").value, password: $("loginPass").value }) });
+    show("app");
+    switchTab("conn");
+  } catch (e) { $("loginErr").textContent = "登录失败：" + e.message; }
+});
+$("logoutBtn").addEventListener("click", async () => {
+  try { await api("/api/logout", { method: "POST" }); } catch (e) { /* 退出时忽略错误 */ }
+  show("login");
+});
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+$("refreshDevicesBtn").addEventListener("click", loadConn);
+$("refreshRunsBtn").addEventListener("click", loadRuns);
+$("rotateTokenBtn").addEventListener("click", async () => {
+  if (!confirm("生成新令牌后旧令牌即刻失效，已配好旧令牌的客户端须更新。确定继续吗？")) return;
+  try {
+    const r = await api("/api/token", { method: "POST" });
+    $("newToken").textContent = r.token;
+    $("newTokenWrap").classList.remove("hidden");
+    $("tokenStatus").textContent = "已配置";
+    setStatus("新令牌已生成，请立即复制保存。");
+  } catch (e) { setStatus("生成令牌失败：" + e.message, true); }
+});
+$("copyTokenBtn").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("newToken").textContent); setStatus("已复制到剪贴板。"); }
+  catch (e) { setStatus("复制失败，请手动选中复制。", true); }
+});
+$("notifyForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("notifySaved").textContent = "";
+  const splitList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  const body = {
+    enabled: $("n_enabled").checked,
+    smtpHost: $("n_smtpHost").value.trim(),
+    smtpPort: parseInt($("n_smtpPort").value, 10) || 587,
+    smtpUser: $("n_smtpUser").value.trim(),
+    mailFrom: $("n_mailFrom").value.trim(),
+    mailTo: splitList($("n_mailTo").value),
+    webhookUrl: $("n_webhookUrl").value.trim(),
+    remindOffsets: splitList($("n_remindOffsets").value).map((x) => parseInt(x, 10)).filter((x) => !isNaN(x)),
+    catchUpMin: parseInt($("n_catchUpMin").value, 10) || 0,
+    timezone: $("n_timezone").value.trim() || "Asia/Shanghai",
+    digestEnabled: $("n_digestEnabled").checked,
+    digestHour: parseInt($("n_digestHour").value, 10) || 0,
+  };
+  const pw = $("n_smtpPassword").value;
+  const ws = $("n_webhookSecret").value;
+  if ($("n_clearSmtpPassword").checked) body.smtpPassword = "";
+  else if (pw) body.smtpPassword = pw;
+  if ($("n_clearWebhookSecret").checked) body.webhookSecret = "";
+  else if (ws) body.webhookSecret = ws;
+  try {
+    await api("/api/notify", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("notifySaved").textContent = "已保存";
+    setStatus("通知配置已保存。");
+  } catch (e) { setStatus("保存失败：" + e.message, true); }
+});
+$("testMailBtn").addEventListener("click", async () => {
+  const to = $("testMailTo").value.trim();
+  try {
+    await api("/api/test/mail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(to ? { to: to } : {}) });
+    $("testResult").textContent = "测试邮件已发送。";
+    $("testResult").className = "ok";
+  } catch (e) { $("testResult").textContent = "测试邮件失败：" + e.message; $("testResult").className = "bad"; }
+});
+$("testWebhookBtn").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/test/webhook", { method: "POST" });
+    $("testResult").textContent = "测试 Webhook 已发送，对方状态：" + r.status;
+    $("testResult").className = "ok";
+  } catch (e) { $("testResult").textContent = "测试 Webhook 失败：" + e.message; $("testResult").className = "bad"; }
+});
+// 开场：已登录则进应用，否则显示登录框。
+api("/api/devices").then(() => { show("app"); switchTab("conn"); }).catch(() => show("login"));
+</script>
+</body>
+</html>

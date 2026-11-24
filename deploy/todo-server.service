@@ -1,0 +1,39 @@
+# todo-server 的 systemd 保活单元（M11）
+#
+# 正本在仓库：deploy/todo-server.service。/etc/systemd/system 下的只是安装副本。
+# 已知环境坑：本机 VM 重启会回滚 /tmp 与 apt 装的系统包，/etc 的持久性未知，
+# 所以 unit 文件一旦改动只改仓库正本；重启后如 /etc 副本丢失，从正本重装即可：
+#   sudo cp deploy/todo-server.service /etc/systemd/system/todo-server.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now todo-server
+#
+# 密钥说明：环境变量从 EnvironmentFile 读项目目录的 .env（0600、root 所有）。
+# 本单元以 User=root 运行，所以读得到该文件；若把 User 改成非 root，必须另给
+# .env 读权限或改用别处存放的 EnvironmentFile，否则服务起不来。
+# 绝不要把密钥值写进本文件。
+#
+# 常用命令：
+#   sudo systemctl status todo-server
+#   sudo systemctl restart todo-server
+#   sudo journalctl -u todo-server -f
+#   curl http://127.0.0.1:8787/healthz
+#
+# 与 docker compose 二选一：不要同时用 unit 与 compose 起两个实例监听 8787，
+# 会端口冲突；也不要与开发时 nohup 起的服务同时跑。
+
+[Unit]
+Description=Todo sync server (todo-server)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/todo-app
+EnvironmentFile=/opt/todo-app/.env
+ExecStart=/opt/todo-app/target/release/todo-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

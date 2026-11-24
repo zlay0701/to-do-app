@@ -1,0 +1,10 @@
+/target
+/dist
+/node_modules
+/src-tauri/target
+*.log
+.DS_Store
+.env
+/data
+.workbuddy/
+**/.gradle/

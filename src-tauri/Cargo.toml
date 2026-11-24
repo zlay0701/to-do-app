@@ -1,0 +1,25 @@
+[package]
+name = "todo-app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "todo_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+todo-core = { path = "../crates/core" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+keyring = "3"
+
+# Android Keystore 经 JNI 调用（android_secret.rs）。jni 0.21 已是 Tauri 的
+# 传递依赖（Cargo.lock 里有），这里只是直接引用，不引入新 crate。
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

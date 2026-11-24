@@ -1,0 +1,55 @@
+# Todo 服务端 docker-compose 配置（M11）
+#
+# 启动前准备（只做一次）：在项目目录下建 .env（0600，已进 .gitignore），写入
+#   TODO_MASTER_KEY=<32 字节 base64，必填>
+#   TODO_ADMIN_PASSWORD=<首次种子 Admin 账号 admin 的密码>
+#   TODO_SYNC_TOKEN=<首次种子同步令牌>
+# compose 会自动读项目目录的 .env；下面 environment 里的 ${VAR:?…} 是必填校验，
+# 缺失时 `docker compose config` / `up` 会直接报错，而不是带着空值启动。
+# 密钥值只存在 .env / shell 环境里，绝不要写进本文件、不要提交。
+#
+# 启动 / 停止：
+#   docker compose up -d          # 后台启动，端口 8787
+#   docker compose ps
+#   curl http://127.0.0.1:8787/healthz
+#   docker compose down           # 停服务；named volume todo-data 保留，数据不丢
+#   docker compose down -v        # 停服务并删除数据卷（会删库，谨慎）
+#
+# 数据卷：生产建议用 named volume（todo-data，见下）。
+#   利：与仓库目录解耦，备份/迁移只认卷名；不会因 .gitignore / 权限误动；
+#       换宿主机时 `docker volume` 整体搬走即可。
+#   弊：数据不在仓库目录里直观可见，须用 `docker volume inspect` / 备份命令找位置。
+#   备选是绑定挂载 ./data:/data：利是文件就在项目里、备份就是 cp；弊是宿主机
+#   目录权限、.gitignore 与多实例共用容易踩坑，且本仓库 ./data 已是开发库
+#   （data/server.db），与容器库混用会互相覆盖——所以默认不用绑定挂载。
+
+services:
+  todo-server:
+    build:
+      context: .
+      # 构建期代理（本机构建环境有出口代理时才需要）：只用于 cargo 拉取 crates，
+      # 不会进 runtime 镜像。无代理的环境留空即可。
+      args:
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    image: todo-server:latest
+    container_name: todo-server
+    ports:
+      - "8787:8787"
+    volumes:
+      - todo-data:/data
+    environment:
+      TODO_MASTER_KEY: ${TODO_MASTER_KEY:?必须设置 TODO_MASTER_KEY（32 字节 base64）}
+      TODO_ADMIN_PASSWORD: ${TODO_ADMIN_PASSWORD:-}
+      TODO_SYNC_TOKEN: ${TODO_SYNC_TOKEN:-}
+      TODO_DB_PATH: /data/app.db
+      TODO_PORT: "8787"
+      TODO_POLL_INTERVAL: ${TODO_POLL_INTERVAL:-60}
+      # 容器内裸 HTTP 监听；生产必须在前面挂 TLS 反代（见 README「部署」），
+      # 不要把 8787 直接暴露到公网。
+      TODO_INSECURE_HTTP: "1"
+    restart: unless-stopped
+
+volumes:
+  todo-data:
